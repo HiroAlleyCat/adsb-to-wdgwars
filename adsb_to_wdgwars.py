@@ -104,6 +104,61 @@ def load_key(cli_key: str | None) -> str:
     return ""
 
 
+def interactive_setup() -> int:
+    """First-run setup. Prompts the user for their API key, validates it
+    against /api/me, and saves it on success. Loops until they enter a valid
+    key or hit Ctrl+C."""
+    print("", file=sys.stderr)
+    print("─" * 60, file=sys.stderr)
+    print(" adsb-to-wdgwars — first-time setup", file=sys.stderr)
+    print("─" * 60, file=sys.stderr)
+    print("", file=sys.stderr)
+    print(" Get your API key from your WDGoWars profile page:", file=sys.stderr)
+    print("   https://wdgwars.pl/  →  profile  →  API Key", file=sys.stderr)
+    print("", file=sys.stderr)
+    print(" It will be saved to:", file=sys.stderr)
+    print(f"   {_key_path()}", file=sys.stderr)
+    print(" (mode 0600 on Unix — only you can read it)", file=sys.stderr)
+    print("", file=sys.stderr)
+
+    while True:
+        try:
+            # Interactive TTY -> hidden input via getpass
+            # Piped stdin (CI, testing) -> regular input (visible but works)
+            if sys.stdin.isatty():
+                import getpass
+                key = getpass.getpass(" Paste your WDGoWars API key (hidden): ").strip()
+            else:
+                # Non-interactive: don't hang on getpass, just read a line
+                print(" Paste your WDGoWars API key: ", end="", flush=True,
+                      file=sys.stderr)
+                key = sys.stdin.readline().strip()
+        except (KeyboardInterrupt, EOFError):
+            print("\n[adsb] setup cancelled — no key saved", file=sys.stderr)
+            return 1
+
+        if not key:
+            print(" (empty input — try again, or Ctrl+C to cancel)\n",
+                  file=sys.stderr)
+            continue
+
+        print(" Validating key against wdgwars.pl/api/me ...", file=sys.stderr)
+        rc = check_whoami(key)
+        if rc != 0:
+            print(" That key was rejected. Try again, or Ctrl+C to cancel.\n",
+                  file=sys.stderr)
+            continue
+
+        save_key(key)
+        print("", file=sys.stderr)
+        print(" ✓ Setup complete. You can now run uploads without --key:",
+              file=sys.stderr)
+        print("   python3 adsb_to_wdgwars.py yourfile.txt --upload",
+              file=sys.stderr)
+        print("", file=sys.stderr)
+        return 0
+
+
 def save_key(key: str) -> None:
     """Save the API key to user config. Refuses to write through a symlink
     (anti-symlink-attack: prevents overwriting unrelated files if someone
@@ -678,8 +733,14 @@ def watch_dir(watch_dir: Path, args) -> int:
     if args.upload:
         api_key = load_key(args.key)
         if not api_key:
-            sys.exit("no API key — pass --key, set WDGWARS_API_KEY, or "
-                     "run `--save-key YOURKEY` first to store it permanently")
+            print("\n[adsb] no API key found — let's set one up before "
+                  "starting the watch.", file=sys.stderr)
+            rc = interactive_setup()
+            if rc != 0:
+                return rc
+            api_key = load_key(args.key)
+            if not api_key:
+                sys.exit("setup completed but key not loadable — strange")
 
     print(f"[watch] watching {watch_dir.resolve()} every {args.watch_interval}s "
           f"for {args.watch_glob!r} (Ctrl+C to stop)", file=sys.stderr)
@@ -746,9 +807,12 @@ def main() -> int:
                     help="ADS-B capture file (.txt, .csv, .json) "
                          "OR a directory when used with --watch. "
                          "Not required when using --save-key or --whoami.")
+    ap.add_argument("--setup", action="store_true",
+                    help="interactive first-time setup — prompts for your "
+                         "WDGoWars API key, validates it, saves it locally.")
     ap.add_argument("--save-key", metavar="KEY",
-                    help="save your WDGoWars API key to the user config "
-                         "directory so future runs don't need --key or env vars")
+                    help="non-interactive: save the given API key to the user "
+                         "config dir. Prefer --setup for first-time install.")
     ap.add_argument("--whoami", action="store_true",
                     help="validate your stored API key by hitting /api/me and "
                          "showing your account stats; exits after.")
@@ -783,14 +847,16 @@ def main() -> int:
     args = ap.parse_args()
 
     # Key management modes — handle before requiring an input file
+    if args.setup:
+        return interactive_setup()
     if args.save_key:
         save_key(args.save_key)
         return 0
     if args.whoami:
         key = load_key(args.key)
         if not key:
-            sys.exit("no API key found — pass --key, set WDGWARS_API_KEY, or "
-                     "run `--save-key YOURKEY` first")
+            sys.exit("no API key found — run `python3 adsb_to_wdgwars.py --setup` "
+                     "for first-time setup")
         return check_whoami(key)
 
     if not args.input:
@@ -851,8 +917,15 @@ def main() -> int:
     if args.upload:
         key = load_key(args.key)
         if not key:
-            sys.exit("no API key — pass --key, set WDGWARS_API_KEY, or "
-                     "run `--save-key YOURKEY` first to store it permanently")
+            # First-time upload without a saved key — offer to set it up now.
+            print("\n[adsb] no API key found — let's set one up.",
+                  file=sys.stderr)
+            rc = interactive_setup()
+            if rc != 0:
+                return rc
+            key = load_key(args.key)
+            if not key:  # paranoia — should never happen if setup returned 0
+                sys.exit("setup completed but key not loadable — strange")
         return upload(records, key, args.api_url,
                       batch_size=args.batch_size, dry_run=args.dry_run)
 

@@ -70,29 +70,48 @@ python3 adsb_to_wdgwars.py your-file.txt --out ~/Desktop/aircraft.json
 
 Want to pipe it somewhere else (a different script, jq, etc.) without writing a file? Use `--stdout`.
 
-### Step 5: Save your API key (once)
+### Step 5: One-time setup (saves your API key)
 
-Get your WDGoWars API key from your profile page on `wdgwars.pl`, then store it permanently:
-
-```bash
-python3 adsb_to_wdgwars.py --save-key "your-api-key-here"
-```
-
-That writes the key to a local config file (`~/.config/adsb-to-wdgwars/api.key` on Mac/Linux, `%APPDATA%\adsb-to-wdgwars\api.key` on Windows) with mode-600 permissions on Unix. **You only have to do this once.**
-
-Verify the key works:
+Run the interactive setup:
 
 ```bash
-python3 adsb_to_wdgwars.py --whoami
+python3 adsb_to_wdgwars.py --setup
 ```
 
-Expected output:
+You'll see:
+
+```
+────────────────────────────────────────────────────────────
+ adsb-to-wdgwars — first-time setup
+────────────────────────────────────────────────────────────
+
+ Get your API key from your WDGoWars profile page:
+   https://wdgwars.pl/  →  profile  →  API Key
+
+ It will be saved to:
+   /home/you/.config/adsb-to-wdgwars/api.key
+ (mode 0600 on Unix — only you can read it)
+
+ Paste your WDGoWars API key (hidden):
+```
+
+Paste your key (it stays hidden — won't show in your terminal or shell history), hit Enter. The tool validates the key against the WDGoWars server, then saves it locally if it works. **You only do this once.**
+
+You'll see:
 ```
 [adsb] key OK — user=YourName
 [adsb]   wifi=29067 ble=65420 aircraft=4053 total=98540
+ ✓ Setup complete. You can now run uploads without --key:
+   python3 adsb_to_wdgwars.py yourfile.txt --upload
 ```
 
-If it's wrong you'll get `HTTP 401: Missing or invalid API key` — re-run `--save-key` with the right value.
+If you paste the wrong key, the tool tells you and lets you try again. Ctrl+C to cancel.
+
+> **Don't want to use `--setup`?** You can also pass the key non-interactively:
+> ```bash
+> python3 adsb_to_wdgwars.py --save-key "your-key-here"
+> ```
+> Or just run an upload — if no key is saved, the tool automatically prompts you for one and saves it after.
 
 ### Step 6: Upload
 
@@ -102,14 +121,14 @@ python3 adsb_to_wdgwars.py your-h4m-file.txt --upload
 
 That's it. No env vars, no `--key` flag, the tool reads your saved key automatically.
 
-**One-off override** (different account, testing, etc.) — pass `--key` on the command line:
+**Verify your saved key any time:**
 ```bash
-python3 adsb_to_wdgwars.py your-file.txt --upload --key "different-key"
+python3 adsb_to_wdgwars.py --whoami
 ```
 
-Or set an env var for a single shell session:
+**One-off override** (different account, testing) — pass `--key` on the command line:
 ```bash
-WDGWARS_API_KEY="testkey" python3 adsb_to_wdgwars.py your-file.txt --upload
+python3 adsb_to_wdgwars.py your-file.txt --upload --key "different-key"
 ```
 
 ### Key resolution order
@@ -117,7 +136,9 @@ WDGWARS_API_KEY="testkey" python3 adsb_to_wdgwars.py your-file.txt --upload
 The tool looks for your API key in this order — first match wins:
 1. `--key YOURKEY` on the command line
 2. `$WDGWARS_API_KEY` environment variable
-3. Saved key file (`--save-key` writes this)
+3. Saved key file (written by `--setup` or `--save-key`)
+
+If none of those find a key when you try to `--upload`, the tool automatically drops into interactive setup so you can paste it then.
 
 Done. You should see something like:
 
