@@ -61,6 +61,80 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_API_URL = "https://wdgwars.pl/api/upload/"
+ME_API_URL = "https://wdgwars.pl/api/me"
+
+# Persistent API key location — XDG-style on Linux/Mac, %APPDATA% on Windows.
+def _config_dir() -> Path:
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "adsb-to-wdgwars"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "adsb-to-wdgwars"
+
+
+def _key_path() -> Path:
+    return _config_dir() / "api.key"
+
+
+def load_key(cli_key: str | None) -> str:
+    """Resolve API key in priority order:
+    1. --key CLI flag
+    2. $WDGWARS_API_KEY env var
+    3. ~/.config/adsb-to-wdgwars/api.key (saved via --save-key)
+    """
+    if cli_key:
+        return cli_key.strip()
+    env = os.environ.get("WDGWARS_API_KEY", "").strip()
+    if env:
+        return env
+    p = _key_path()
+    if p.exists():
+        try:
+            return p.read_text().strip()
+        except Exception as e:
+            print(f"warn: could not read {p}: {e}", file=sys.stderr)
+    return ""
+
+
+def save_key(key: str) -> None:
+    p = _key_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(key.strip() + "\n")
+    # Tighten perms on Unix (no-op on Windows)
+    try:
+        os.chmod(p, 0o600)
+    except Exception:
+        pass
+    print(f"[adsb] saved API key to {p}", file=sys.stderr)
+    print(f"[adsb] you can now run uploads without --key or env var", file=sys.stderr)
+
+
+def check_whoami(key: str) -> int:
+    """Hit /api/me to validate the key. Prints username + counts on success."""
+    req = urllib.request.Request(
+        ME_API_URL,
+        headers={"X-API-Key": key,
+                 "User-Agent": "adsb-to-wdgwars/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode())
+            if not data.get("ok"):
+                print(f"[adsb] key rejected: {data}", file=sys.stderr)
+                return 1
+            print(f"[adsb] key OK — user={data.get('username')}",
+                  file=sys.stderr)
+            print(f"[adsb]   wifi={data.get('wifi', 0)} "
+                  f"ble={data.get('ble', 0)} aircraft={data.get('aircraft', 0)} "
+                  f"total={data.get('total', 0)}", file=sys.stderr)
+            return 0
+    except urllib.error.HTTPError as e:
+        print(f"[adsb] HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}",
+              file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[adsb] whoami failed: {e}", file=sys.stderr)
+        return 1
 
 
 # ── Format detection ────────────────────────────────────────────────────────
@@ -566,9 +640,10 @@ def watch_dir(watch_dir: Path, args) -> int:
 
     api_key = None
     if args.upload:
-        api_key = args.key or os.environ.get("WDGWARS_API_KEY", "").strip()
+        api_key = load_key(args.key)
         if not api_key:
-            sys.exit("no API key — pass --key or set WDGWARS_API_KEY")
+            sys.exit("no API key — pass --key, set WDGWARS_API_KEY, or "
+                     "run `--save-key YOURKEY` first to store it permanently")
 
     print(f"[watch] watching {watch_dir.resolve()} every {args.watch_interval}s "
           f"for {args.watch_glob!r} (Ctrl+C to stop)", file=sys.stderr)
@@ -631,8 +706,16 @@ def main() -> int:
                "generic CSV). For generic CSV inputs, pass --csv-format to "
                "specify the column order.",
     )
-    ap.add_argument("input", help="ADS-B capture file (.txt, .csv, .json) "
-                    "OR a directory when used with --watch")
+    ap.add_argument("input", nargs="?",
+                    help="ADS-B capture file (.txt, .csv, .json) "
+                         "OR a directory when used with --watch. "
+                         "Not required when using --save-key or --whoami.")
+    ap.add_argument("--save-key", metavar="KEY",
+                    help="save your WDGoWars API key to the user config "
+                         "directory so future runs don't need --key or env vars")
+    ap.add_argument("--whoami", action="store_true",
+                    help="validate your stored API key by hitting /api/me and "
+                         "showing your account stats; exits after.")
     ap.add_argument("--watch", action="store_true",
                     help="watch the input as a directory and process new "
                          "files as they appear (loops until Ctrl+C)")
@@ -663,6 +746,19 @@ def main() -> int:
                     help="aircraft per upload chunk (default: 1000)")
     args = ap.parse_args()
 
+    # Key management modes — handle before requiring an input file
+    if args.save_key:
+        save_key(args.save_key)
+        return 0
+    if args.whoami:
+        key = load_key(args.key)
+        if not key:
+            sys.exit("no API key found — pass --key, set WDGWARS_API_KEY, or "
+                     "run `--save-key YOURKEY` first")
+        return check_whoami(key)
+
+    if not args.input:
+        ap.error("input file/directory is required (unless using --save-key or --whoami)")
     path = Path(args.input)
     if not path.exists():
         sys.exit(f"input not found: {path}")
@@ -717,9 +813,10 @@ def main() -> int:
               f"       {out_path}\n", file=sys.stderr)
 
     if args.upload:
-        key = args.key or os.environ.get("WDGWARS_API_KEY", "").strip()
+        key = load_key(args.key)
         if not key:
-            sys.exit("no API key — pass --key or set WDGWARS_API_KEY")
+            sys.exit("no API key — pass --key, set WDGWARS_API_KEY, or "
+                     "run `--save-key YOURKEY` first to store it permanently")
         return upload(records, key, args.api_url,
                       batch_size=args.batch_size, dry_run=args.dry_run)
 
