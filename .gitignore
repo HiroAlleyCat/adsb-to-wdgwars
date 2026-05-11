@@ -4,7 +4,22 @@ __pycache__/
 .venv/
 venv/
 .DS_Store
-*.json
-!examples/*.json
 .idea/
 .vscode/
+
+# Generated outputs from converter
+*.wdgwars.json
+*.wdgwars.json.bak
+
+# Watch-mode state file
+.adsb-state.json
+
+# Never commit captured/secret data
+api.key
+*.key
+.env
+.env.local
+
+# Keep example files (whitelisted after the *.json deny)
+*.json
+!examples/*.json

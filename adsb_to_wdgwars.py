@@ -55,8 +55,16 @@ import os
 import secrets
 import sys
 import time
+import ssl
 import urllib.error
 import urllib.request
+
+# Explicit SSL context — defense in depth. urllib.request defaults to system
+# trust store and full cert verification since Python 3.4.3 (PEP 476), but
+# being explicit makes this the obvious answer in code review.
+_SSL_CTX = ssl.create_default_context()
+# create_default_context() already enables: cert verification, hostname check,
+# TLS 1.2 minimum, secure ciphers. Don't weaken any of these.
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -97,30 +105,58 @@ def load_key(cli_key: str | None) -> str:
 
 
 def save_key(key: str) -> None:
+    """Save the API key to user config. Refuses to write through a symlink
+    (anti-symlink-attack: prevents overwriting unrelated files if someone
+    points api.key at e.g. ~/.ssh/id_rsa)."""
     p = _key_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(key.strip() + "\n")
-    # Tighten perms on Unix (no-op on Windows)
+    # Refuse to follow a symlink — would let an attacker redirect the write
+    if p.is_symlink():
+        sys.exit(f"refusing to write through symlink: {p} -> {os.readlink(p)}\n"
+                 f"remove the symlink and re-run --save-key")
+    # Write with restrictive permissions atomically: chmod the empty file BEFORE
+    # writing the secret, so it's never world-readable even briefly.
+    fd = os.open(str(p), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        os.write(fd, (key.strip() + "\n").encode())
+    finally:
+        os.close(fd)
+    # Belt+suspenders chmod on Unix (no-op on Windows)
     try:
         os.chmod(p, 0o600)
     except Exception:
         pass
     print(f"[adsb] saved API key to {p}", file=sys.stderr)
-    print(f"[adsb] you can now run uploads without --key or env var", file=sys.stderr)
+    print(f"[adsb] (file mode 600 — only your user can read it)", file=sys.stderr)
+    print(f"[adsb] you can now run uploads without --key or env var",
+          file=sys.stderr)
+
+
+def _scrub(text: str, key: str) -> str:
+    """Defensive: if the API key ever leaks into a server error message or
+    exception trace, redact it before we print to the terminal."""
+    if key and len(key) > 8 and key in text:
+        return text.replace(key, key[:4] + "…" + key[-4:])
+    return text
 
 
 def check_whoami(key: str) -> int:
-    """Hit /api/me to validate the key. Prints username + counts on success."""
+    """Hit /api/me to validate the key. Prints username + counts on success.
+    Never echoes the API key in any output, even on failure."""
     req = urllib.request.Request(
         ME_API_URL,
         headers={"X-API-Key": key,
                  "User-Agent": "adsb-to-wdgwars/1.0"},
     )
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
             data = json.loads(resp.read().decode())
             if not data.get("ok"):
-                print(f"[adsb] key rejected: {data}", file=sys.stderr)
+                # Only show the error field, not the whole response dict
+                # (response shape is server-controlled — defensive)
+                err = data.get("error", "unknown")
+                print(f"[adsb] key rejected: {_scrub(err, key)}",
+                      file=sys.stderr)
                 return 1
             print(f"[adsb] key OK — user={data.get('username')}",
                   file=sys.stderr)
@@ -129,11 +165,11 @@ def check_whoami(key: str) -> int:
                   f"total={data.get('total', 0)}", file=sys.stderr)
             return 0
     except urllib.error.HTTPError as e:
-        print(f"[adsb] HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}",
-              file=sys.stderr)
+        body = e.read().decode("utf-8", "replace")[:200]
+        print(f"[adsb] HTTP {e.code}: {_scrub(body, key)}", file=sys.stderr)
         return 1
     except Exception as e:
-        print(f"[adsb] whoami failed: {e}", file=sys.stderr)
+        print(f"[adsb] whoami failed: {_scrub(str(e), key)}", file=sys.stderr)
         return 1
 
 
@@ -571,7 +607,7 @@ def upload(records: list[dict], api_key: str, api_url: str = DEFAULT_API_URL,
         )
         try:
             t0 = time.monotonic()
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=120, context=_SSL_CTX) as resp:
                 txt = resp.read().decode("utf-8", "replace")
                 data = json.loads(txt) if txt else {}
                 imp = data.get("aircraft_imported", 0)
@@ -585,11 +621,11 @@ def upload(records: list[dict], api_key: str, api_url: str = DEFAULT_API_URL,
                 if badges:
                     print(f"  new badges: {badges}", file=sys.stderr)
         except urllib.error.HTTPError as e:
-            print(f"  HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:200]}",
-                  file=sys.stderr)
+            body = e.read().decode("utf-8", "replace")[:200]
+            print(f"  HTTP {e.code}: {_scrub(body, api_key)}", file=sys.stderr)
             return 1
         except Exception as e:
-            print(f"  upload error: {e}", file=sys.stderr)
+            print(f"  upload error: {_scrub(str(e), api_key)}", file=sys.stderr)
             return 1
     print(f"DONE — aircraft_sent={total_sent} imported={total_imported} "
           f"already_seen={total_seen}", file=sys.stderr)

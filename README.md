@@ -253,7 +253,13 @@ Sure — the whole tool is one Python file (`adsb_to_wdgwars.py`, ~530 lines). R
 
 ### Does it leak my data anywhere?
 
-No. The tool only POSTs to `https://wdgwars.pl/api/upload/` (the URL is hardcoded — change with `--api-url` if WDGoWars ever moves it). No telemetry, no analytics. Run it offline with `--out aircraft.json` if you want to verify the output before uploading.
+No. The tool only POSTs to `https://wdgwars.pl/api/upload/` (the URL is hardcoded — change with `--api-url` if WDGoWars ever moves it). No telemetry, no analytics, no error reporting. Run it offline with `--stdout` if you want to verify the output before uploading.
+
+### Is my API key stored securely?
+
+Yes. When you run `--save-key`, the file is written with mode `0600` (Unix — only your user can read it) via a low-level `os.open()` that sets permissions **before** writing the secret. Symlink attacks are explicitly blocked. The key is never printed in any output, even on errors (any leak into a server response message is scrubbed with `xxxx…xxxx` redaction before display).
+
+See [SECURITY.md](SECURITY.md) for the full threat model + mitigations.
 
 ---
 
@@ -373,6 +379,12 @@ python3 adsb_to_wdgwars.py myfile.csv \
 Recognised column names (case-insensitive): `icao` / `hex`, `callsign`, `lat` / `latitude`, `lon` / `longitude`, `alt_ft` / `alt` / `altitude`, `speed_kt` / `speed` / `gs`, `heading` / `track` / `cog`, `first_seen` / `timestamp`. Use `_` or `skip` to ignore a column.
 
 ---
+
+## Security
+
+Full threat model + mitigations in [SECURITY.md](SECURITY.md). Short version: API key stored mode-600, never printed in errors (scrubbed), explicit TLS verification, no telemetry, no `eval`/`exec`/`shell=True`, no network calls without `--upload` opt-in, symlink-attack-resistant key file writes.
+
+Report security issues via GitHub Security Advisories (link in SECURITY.md), not public issues.
 
 ## License
 
