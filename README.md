@@ -47,13 +47,28 @@ pip install pyModeS
 
 ### Step 4: Convert your file
 
-Put your H4M `.txt` file in the same folder, then:
+You can run this from anywhere — the tool writes its output **right next to your input file**, not wherever you happen to be:
 
 ```bash
-python3 adsb_to_wdgwars.py your-h4m-file.txt --out aircraft.json
+python3 adsb_to_wdgwars.py /path/to/your-h4m-file.txt
 ```
 
-This makes a new file called `aircraft.json` with the data WDGoWars wants.
+That writes `your-h4m-file.wdgwars.json` next to your input. The tool prints the full path when it's done so you know exactly where to look. Example output:
+
+```
+[adsb] detected format: mayhem
+[adsb] decoded 47 unique aircraft with positions
+
+[adsb] OK -- wrote 47 aircraft to:
+       /home/babe/captures/ADSB.wdgwars.json
+```
+
+Want a different name or location? Use `--out`:
+```bash
+python3 adsb_to_wdgwars.py your-file.txt --out ~/Desktop/aircraft.json
+```
+
+Want to pipe it somewhere else (a different script, jq, etc.) without writing a file? Use `--stdout`.
 
 ### Step 5: Upload
 
@@ -246,8 +261,8 @@ Format reference is reverse-engineered from the canonical [`LOCOSP/WatchDogsGo`]
 ### Full CLI
 
 ```
-usage: adsb_to_wdgwars.py [-h] [--out OUT]
-                          [--format {auto,avr,sbs1,json,csv}]
+usage: adsb_to_wdgwars.py [-h] [--out OUT] [--stdout] [--no-save]
+                          [--format {auto,avr,sbs1,json,csv,mayhem}]
                           [--csv-format CSV_FORMAT]
                           [--upload] [--dry-run]
                           [--key KEY] [--api-url API_URL]
@@ -258,7 +273,10 @@ positional arguments:
   input                 ADS-B capture file (.txt, .csv, .json)
 
 options:
-  --out OUT, -o OUT     write JSON to this path
+  --out PATH            write JSON to this exact path
+                        (default: <input>.wdgwars.json right next to input)
+  --stdout              print JSON to stdout instead of writing a file
+  --no-save             with --upload: skip the local audit-trail JSON
   --format              force input format (default: auto-detect)
   --csv-format          column order for generic CSV
   --upload              POST to wdgwars.pl after conversion
@@ -267,6 +285,18 @@ options:
   --api-url URL         override upload endpoint
   --batch-size N        aircraft per upload chunk (default: 1000)
 ```
+
+### Where does the output go?
+
+| You ran | Output goes to |
+|---|---|
+| `python3 adsb_to_wdgwars.py file.txt` | `file.wdgwars.json` next to the input |
+| `python3 adsb_to_wdgwars.py file.txt --out /tmp/x.json` | `/tmp/x.json` exactly |
+| `python3 adsb_to_wdgwars.py file.txt --stdout` | stdout (nothing written) |
+| `python3 adsb_to_wdgwars.py file.txt --upload` | `file.wdgwars.json` (kept as audit trail) **and** POSTed to WDGoWars |
+| `python3 adsb_to_wdgwars.py file.txt --upload --no-save` | POSTed only, no local file |
+
+The tool always prints the absolute path of the output file so you can find it.
 
 ### Custom CSV format hint
 

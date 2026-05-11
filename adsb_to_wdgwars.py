@@ -532,7 +532,12 @@ def main() -> int:
                "specify the column order.",
     )
     ap.add_argument("input", help="ADS-B capture file (.txt, .csv, .json)")
-    ap.add_argument("--out", "-o", help="write JSON to this path (default: stdout if not uploading)")
+    ap.add_argument("--out", "-o", help="write JSON to this exact path "
+                    "(default: <input>.wdgwars.json next to the input file)")
+    ap.add_argument("--stdout", action="store_true",
+                    help="print JSON to stdout instead of writing a file")
+    ap.add_argument("--no-save", action="store_true",
+                    help="with --upload: skip writing the local audit-trail JSON")
     ap.add_argument("--format", choices=["auto", "avr", "sbs1", "json", "csv", "mayhem"],
                     default="auto", help="force input format (default: auto-detect)")
     ap.add_argument("--csv-format", help="comma-separated column names for "
@@ -574,11 +579,28 @@ def main() -> int:
     print(f"[adsb] decoded {len(records)} unique aircraft with positions",
           file=sys.stderr)
 
-    if args.out:
-        Path(args.out).write_text(json.dumps(records, indent=2))
-        print(f"[adsb] wrote {args.out}", file=sys.stderr)
-    elif not args.upload:
+    # Decide where output goes:
+    #   --stdout            -> print to stdout, write nothing
+    #   --out PATH          -> write to that exact path
+    #   --upload --no-save  -> upload-only, no local file
+    #   (otherwise)         -> <input>.wdgwars.json next to the input file
+    out_path: Path | None = None
+    if args.stdout:
         print(json.dumps(records, indent=2))
+    elif args.out:
+        out_path = Path(args.out).expanduser().resolve()
+    elif args.upload and args.no_save:
+        out_path = None
+    else:
+        # Default: same directory as input, suffixed .wdgwars.json
+        stem = path.stem  # filename without extension
+        out_path = (path.parent / f"{stem}.wdgwars.json").resolve()
+
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(records, indent=2))
+        print(f"\n[adsb] OK -- wrote {len(records)} aircraft to:\n"
+              f"       {out_path}\n", file=sys.stderr)
 
     if args.upload:
         key = args.key or os.environ.get("WDGWARS_API_KEY", "").strip()
