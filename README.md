@@ -15,10 +15,25 @@ One Python script. No dependencies for most formats.
 ```bash
 git clone https://github.com/HiroAlleyCat/adsb-to-wdgwars
 cd adsb-to-wdgwars
-python3 muninn.py /path/to/your-capture.txt
 ```
 
-Writes `your-capture.wdgwars.json` next to your input file. Done.
+### Easiest: drop-in folder workflow
+
+1. Put your `ADSB.TXT` (or any supported capture file) in the **`input/`** folder.
+2. Run:
+   ```bash
+   python3 muninn.py
+   ```
+3. Grab the converted `.wdgwars.json` from the **`output/`** folder.
+
+Drop multiple files in `input/` and they all get converted in one pass.
+
+### Or pass a path directly
+
+```bash
+python3 muninn.py /path/to/your-capture.txt
+```
+Writes `your-capture.wdgwars.json` next to the input file.
 
 ---
 
@@ -49,7 +64,8 @@ Auto-detected from the first line of the file:
 ## Useful flags
 
 ```
---out PATH       write JSON somewhere specific (default: next to input)
+--out PATH       write JSON to one specific output path
+--out-dir DIR    write all output JSON into this folder (created if missing)
 --stdout         print JSON to stdout instead of writing a file
 --upload         POST to WDGoWars after converting
 --watch DIR      watch a folder, auto-convert + upload new files as they appear

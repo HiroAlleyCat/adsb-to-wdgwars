@@ -45,7 +45,7 @@ License: MIT
 """
 from __future__ import annotations
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 GITHUB_REPO = "HiroAlleyCat/adsb-to-wdgwars"
 
 import argparse
@@ -860,6 +860,76 @@ def watch_dir(watch_dir: Path, args) -> int:
 
 
 # ── CLI ─────────────────────────────────────────────────────────────────────
+def _process_one_file(path: Path, args) -> tuple[int, list[dict]]:
+    """Decode a single capture file and write its JSON output.
+    Returns (exit_code, records). Does NOT upload — caller decides."""
+    fmt = args.format if args.format != "auto" else detect_format(path)
+    print(f"[muninn] detected format: {fmt}", file=sys.stderr)
+
+    if fmt == "avr" or fmt == "avr-tagged":
+        rows = parse_avr(path)
+    elif fmt == "sbs1":
+        rows = parse_sbs1(path)
+    elif fmt == "json":
+        rows = parse_json(path)
+    elif fmt == "mayhem":
+        rows = parse_mayhem(path)
+    elif fmt == "csv":
+        rows = parse_csv(path, fmt=args.csv_format)
+    elif fmt == "empty":
+        print(f"[muninn] {path.name}: empty file, skipping", file=sys.stderr)
+        return 0, []
+    else:
+        print(f"[muninn] {path.name}: unknown format ({fmt}), skipping",
+              file=sys.stderr)
+        return 1, []
+
+    records = list(rows.values())
+    print(f"[muninn] decoded {len(records)} unique aircraft with positions",
+          file=sys.stderr)
+
+    web_payload = _to_dump1090_fa(records)
+    out_path: Path | None = None
+
+    if args.stdout:
+        print(json.dumps(web_payload, indent=2))
+    elif args.out:
+        out_path = Path(args.out).expanduser().resolve()
+    elif args.out_dir:
+        od = Path(args.out_dir).expanduser().resolve()
+        out_path = od / f"{path.stem}.wdgwars.json"
+    elif args.upload and args.no_save:
+        out_path = None
+    else:
+        out_path = (path.parent / f"{path.stem}.wdgwars.json").resolve()
+
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(json.dumps(web_payload, indent=2))
+        print(f"[muninn] OK -- wrote {len(records)} aircraft to:\n"
+              f"       {out_path}", file=sys.stderr)
+
+    return 0, records
+
+
+def _do_upload(records: list[dict], args) -> int:
+    """Resolve API key (prompting if needed) and upload records."""
+    key = load_key(args.key)
+    if not key:
+        print("\n[muninn] --upload was passed but no API key is configured.",
+              file=sys.stderr)
+        rc = interactive_setup()
+        if rc != 0:
+            return rc
+        key = load_key(args.key)
+        if not key:
+            print("[muninn] no key saved — skipping upload. Your local JSON "
+                  "file(s) were still written.", file=sys.stderr)
+            return 0
+    return upload(records, key, args.api_url,
+                  batch_size=args.batch_size, dry_run=args.dry_run)
+
+
 def _check_for_update() -> str | None:
     """Quick non-blocking version check against the GitHub releases API.
     Cached for 24h in the user's config dir so we don't hammer the API.
@@ -960,6 +1030,9 @@ def main() -> int:
                          "(default: *.txt). Use '*' for everything.")
     ap.add_argument("--out", "-o", help="write JSON to this exact path "
                     "(default: <input>.wdgwars.json next to the input file)")
+    ap.add_argument("--out-dir", metavar="DIR",
+                    help="write all output JSON into this directory instead "
+                         "of next to each input file. Created if missing.")
     ap.add_argument("--stdout", action="store_true",
                     help="print JSON to stdout instead of writing a file")
     ap.add_argument("--no-save", action="store_true",
@@ -1003,6 +1076,32 @@ def main() -> int:
                      "for first-time setup")
         return check_whoami(key)
 
+    # Zero-config mode: if user ran `python3 muninn.py` with no input AND
+    # there's an `input/` folder next to the script, treat that as the input
+    # directory and `output/` as --out-dir. Lets non-technical users just
+    # drop files in a folder and run the script.
+    if not args.input:
+        script_dir = Path(__file__).resolve().parent
+        default_in = script_dir / "input"
+        default_out = script_dir / "output"
+        if default_in.is_dir():
+            captures = [p for p in default_in.iterdir()
+                        if p.is_file() and not p.name.startswith(".")
+                        and p.suffix.lower() in (".txt", ".csv", ".json", ".log")
+                        and not p.name.lower().endswith("readme.md")]
+            if captures:
+                args.input = [str(default_in)]
+                if not args.out_dir:
+                    args.out_dir = str(default_out)
+                print(f"[muninn] zero-config: processing {len(captures)} file(s) "
+                      f"from {default_in.name}/ -> {default_out.name}/",
+                      file=sys.stderr)
+            else:
+                print(f"[muninn] {default_in.name}/ is empty — drop your "
+                      f"ADS-B capture file(s) in there and re-run, or pass "
+                      f"a path explicitly.", file=sys.stderr)
+                return 0
+
     if not args.input:
         ap.error("input file/directory is required (unless using --save-key or --whoami)")
 
@@ -1027,71 +1126,37 @@ def main() -> int:
     if args.watch:
         return watch_dir(path, args)
 
-    fmt = args.format if args.format != "auto" else detect_format(path)
-    print(f"[muninn] detected format: {fmt}", file=sys.stderr)
-
-    if fmt == "avr" or fmt == "avr-tagged":
-        rows = parse_avr(path)
-    elif fmt == "sbs1":
-        rows = parse_sbs1(path)
-    elif fmt == "json":
-        rows = parse_json(path)
-    elif fmt == "mayhem":
-        rows = parse_mayhem(path)
-    elif fmt == "csv":
-        rows = parse_csv(path, fmt=args.csv_format)
-    elif fmt == "empty":
-        sys.exit("input file is empty")
-    else:
-        sys.exit(f"unknown format: {fmt}")
-
-    records = list(rows.values())
-    print(f"[muninn] decoded {len(records)} unique aircraft with positions",
-          file=sys.stderr)
-
-    # Decide where output goes:
-    #   --stdout            -> print to stdout, write nothing
-    #   --out PATH          -> write to that exact path
-    #   --upload --no-save  -> upload-only, no local file
-    #   (otherwise)         -> <input>.wdgwars.json next to the input file
-    out_path: Path | None = None
-    # JSON written to disk / stdout uses dump1090-fa / readsb shape so it can
-    # be drag-and-dropped into the WDGoWars web upload form. The --upload path
-    # uses a separate HMAC envelope against /api/upload/ and is unaffected.
-    web_payload = _to_dump1090_fa(records)
-
-    if args.stdout:
-        print(json.dumps(web_payload, indent=2))
-    elif args.out:
-        out_path = Path(args.out).expanduser().resolve()
-    elif args.upload and args.no_save:
-        out_path = None
-    else:
-        # Default: same directory as input, suffixed .wdgwars.json
-        stem = path.stem  # filename without extension
-        out_path = (path.parent / f"{stem}.wdgwars.json").resolve()
-
-    if out_path is not None:
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(web_payload, indent=2))
-        print(f"\n[muninn] OK -- wrote {len(records)} aircraft to:\n"
-              f"       {out_path}\n", file=sys.stderr)
-
-    if args.upload:
-        key = load_key(args.key)
-        if not key:
-            print("\n[muninn] --upload was passed but no API key is configured.",
-                  file=sys.stderr)
-            rc = interactive_setup()
+    # Directory in single-pass mode (not --watch): iterate over files once
+    if path.is_dir():
+        captures = sorted(p for p in path.iterdir()
+                          if p.is_file() and not p.name.startswith(".")
+                          and p.suffix.lower() in (".txt", ".csv", ".json", ".log")
+                          and not p.name.lower().endswith("readme.md")
+                          and not p.name.endswith(".wdgwars.json"))
+        if not captures:
+            print(f"[muninn] no capture files found in {path}", file=sys.stderr)
+            return 0
+        print(f"[muninn] processing {len(captures)} file(s) from {path}",
+              file=sys.stderr)
+        all_records: list[dict] = []
+        for f in captures:
+            print(f"\n[muninn] --- {f.name} ---", file=sys.stderr)
+            rc, recs = _process_one_file(f, args)
             if rc != 0:
-                return rc
-            key = load_key(args.key)
-            if not key:
-                print("[muninn] no key saved — skipping upload. Your local JSON "
-                      "file was still written.", file=sys.stderr)
-                return 0
-        return upload(records, key, args.api_url,
-                      batch_size=args.batch_size, dry_run=args.dry_run)
+                print(f"[muninn] skipped {f.name} (rc={rc})", file=sys.stderr)
+                continue
+            all_records.extend(recs)
+        if args.upload and all_records:
+            return _do_upload(all_records, args)
+        return 0
+
+    # Single file
+    rc, records = _process_one_file(path, args)
+    if rc != 0:
+        return rc
+    if args.upload:
+        return _do_upload(records, args)
+    return 0
 
     return 0
 

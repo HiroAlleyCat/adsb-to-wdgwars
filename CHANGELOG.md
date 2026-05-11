@@ -4,6 +4,23 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] — 2026-05-11
+
+### Added
+- **`input/` and `output/` folders.** Drop capture files in `input/`, run
+  `python3 muninn.py` with no arguments, get converted JSON in `output/`.
+  Zero-config workflow for non-technical users.
+- **`--out-dir DIR`** writes all output JSON into one directory instead of
+  scattering it next to each input file.
+- **Batch mode**: pointing the input at a directory (instead of a single
+  file) processes every supported capture in one pass. Works with `--upload`
+  too — uploads happen once at the end with all aircraft.
+
+### Changed
+- Single-file conversion logic refactored into `_process_one_file()` so the
+  batch + single + watch paths all share the same code. No behavior change
+  for existing invocations.
+
 ## [1.1.0] — 2026-05-11
 
 ### Added

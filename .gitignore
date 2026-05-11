@@ -11,6 +11,12 @@ venv/
 *.wdgwars.json
 *.wdgwars.json.bak
 
+# User input/output folders — keep the dirs + READMEs but ignore captures
+input/*
+output/*
+!input/README.md
+!output/README.md
+
 # Watch-mode state file
 .adsb-state.json
 
