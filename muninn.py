@@ -289,6 +289,37 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
+def _to_dump1090_fa(records: list[dict]) -> dict:
+    """Wrap muninn's flat record list into dump1090-fa / readsb aircraft.json
+    shape. This is what the WDGoWars *web-form* upload accepts (drag-and-drop
+    of the .json file). The HMAC --upload path uses the flat list directly
+    against /api/upload/ and does NOT use this format."""
+    import time as _t
+    out = []
+    for r in records:
+        a = {
+            "hex":      r["icao"].lower(),
+            "flight":   (r.get("callsign") or "").strip(),
+            "lat":      r["lat"],
+            "lon":      r["lon"],
+            "alt_baro": r.get("alt_ft", 0),
+            "gs":       r.get("speed_kt", 0),
+            "track":    r.get("heading", 0),
+            "seen":     0,
+            "seen_pos": 0,
+            "messages": 1,
+        }
+        # drop empty flight to match readsb behavior
+        if not a["flight"]:
+            a.pop("flight")
+        out.append(a)
+    return {
+        "now":      _t.time(),
+        "messages": len(out),
+        "aircraft": out,
+    }
+
+
 def _norm_record(icao: str, *, callsign: str = "", lat: float | None = None,
                  lon: float | None = None, alt_ft: int = 0, speed_kt: int = 0,
                  heading: int = 0, first_seen: str | None = None) -> dict | None:
@@ -798,7 +829,7 @@ def watch_dir(watch_dir: Path, args) -> int:
                                           args.csv_format)
                     print(f"[watch]   decoded {len(records)} aircraft", file=sys.stderr)
                     out_path = f.parent / f"{f.stem}.wdgwars.json"
-                    out_path.write_text(json.dumps(records, indent=2))
+                    out_path.write_text(json.dumps(_to_dump1090_fa(records), indent=2))
                     print(f"[watch]   wrote {out_path}", file=sys.stderr)
                     if args.upload and records:
                         rc = upload(records, api_key, args.api_url,
@@ -943,8 +974,13 @@ def main() -> int:
     #   --upload --no-save  -> upload-only, no local file
     #   (otherwise)         -> <input>.wdgwars.json next to the input file
     out_path: Path | None = None
+    # JSON written to disk / stdout uses dump1090-fa / readsb shape so it can
+    # be drag-and-dropped into the WDGoWars web upload form. The --upload path
+    # uses a separate HMAC envelope against /api/upload/ and is unaffected.
+    web_payload = _to_dump1090_fa(records)
+
     if args.stdout:
-        print(json.dumps(records, indent=2))
+        print(json.dumps(web_payload, indent=2))
     elif args.out:
         out_path = Path(args.out).expanduser().resolve()
     elif args.upload and args.no_save:
@@ -956,7 +992,7 @@ def main() -> int:
 
     if out_path is not None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(json.dumps(records, indent=2))
+        out_path.write_text(json.dumps(web_payload, indent=2))
         print(f"\n[muninn] OK -- wrote {len(records)} aircraft to:\n"
               f"       {out_path}\n", file=sys.stderr)
 
