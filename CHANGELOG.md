@@ -4,6 +4,18 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.4.1] — 2026-05-11
+
+### Docs
+- README rewritten to walk through the actual first-run experience (folder
+  prompt, desktop option, shortcut creation, daily workflow).
+- README now lists every CLI flag, not just the common ones.
+- Added status badges (latest release, MIT license, security threat model).
+- SECURITY.md documents the daily version-check HEAD request and the
+  desktop-shortcut creation flow.
+- `input/README.md` and `output/README.md` clarified for users who picked
+  the Desktop option (those files only describe the in-repo folders).
+
 ## [1.4.0] — 2026-05-11
 
 ### Added

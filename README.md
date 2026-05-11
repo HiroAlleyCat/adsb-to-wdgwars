@@ -2,11 +2,15 @@
   <img src="assets/banner.png" alt="Muninn — Odin's memory-raven for the WDGoWars sky" width="100%"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/HiroAlleyCat/adsb-to-wdgwars/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/HiroAlleyCat/adsb-to-wdgwars?color=b08850&label=release"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-b08850.svg"></a>
+  <a href="https://github.com/HiroAlleyCat/adsb-to-wdgwars/blob/main/SECURITY.md"><img alt="Security" src="https://img.shields.io/badge/security-threat%20model-b08850.svg"></a>
+</p>
+
 # Muninn
 
-Convert ADS-B capture files (H4M, dump1090, readsb, RTL-SDR) to WDGoWars JSON and optionally upload them.
-
-One Python script. No dependencies for most formats.
+Convert ADS-B capture files (HackRF H4M, dump1090, readsb, RTL-SDR) to WDGoWars-compatible JSON and optionally upload them. One Python script, no required dependencies for most input formats.
 
 ---
 
@@ -15,35 +19,58 @@ One Python script. No dependencies for most formats.
 ```bash
 git clone https://github.com/HiroAlleyCat/adsb-to-wdgwars
 cd adsb-to-wdgwars
+python3 muninn.py
 ```
 
-### Easiest: drop-in folder workflow
+On first run, Muninn asks **where** you want your input/output folders:
 
-1. Put your `ADSB.TXT` (or any supported capture file) in the **`input/`** folder.
-2. Run:
-   ```bash
-   python3 muninn.py
-   ```
-3. Grab the converted `.wdgwars.json` from the **`output/`** folder.
+```
+ Where would you like your input/output folders?
 
-Drop multiple files in `input/` and they all get converted in one pass.
+   1) Right here:  C:\Users\you\adsb-to-wdgwars\input
+                   C:\Users\you\adsb-to-wdgwars\output
+   2) On Desktop:  C:\Users\you\Desktop\Muninn  (with input/ and output/ inside)
+
+ Choose [1/2] (default: 1):
+```
+
+Pick whichever you prefer — it remembers your choice. On Windows, picking option 2 also offers to create a desktop shortcut with the raven icon. Double-click the shortcut and Muninn runs.
+
+### The day-to-day workflow
+
+1. Drop your `ADSB.TXT` (or any supported capture file) into the `input` folder.
+2. Run `python3 muninn.py` (or double-click the desktop shortcut if you have one).
+3. Grab the converted `.wdgwars.json` from the `output` folder.
+
+Multiple files in `input/` get converted in one pass.
 
 ### Or pass a path directly
+
+If you prefer to skip the folder workflow:
 
 ```bash
 python3 muninn.py /path/to/your-capture.txt
 ```
-Writes `your-capture.wdgwars.json` next to the input file.
+
+Output goes next to the input file (`your-capture.wdgwars.json`).
 
 ---
 
-## Upload to WDGoWars
+## Uploading to WDGoWars
+
+Two options:
+
+**Option A — drag-and-drop the JSON into the website.** The `.wdgwars.json` Muninn writes is in the dump1090-fa format that the WDGoWars web upload form accepts. Just drag it from your output folder into the upload page.
+
+**Option B — let Muninn upload for you.** Add `--upload`:
 
 ```bash
-python3 muninn.py your-capture.txt --upload
+python3 muninn.py --upload
 ```
 
-First time uploading? It'll ask for your API key (y/n prompt) and save it for future runs. Grab the key from your WDGoWars profile page.
+First time, Muninn asks for your WDGoWars API key (y/n prompt — local conversion works fine without one). The key is saved locally in mode `0600`, scrubbed from all error output, and sent over TLS 1.2+ with an HMAC-SHA256-signed envelope to `https://wdgwars.pl/api/upload/`.
+
+Grab your API key from your WDGoWars profile page.
 
 ---
 
@@ -61,51 +88,72 @@ Auto-detected from the first line of the file:
 
 ---
 
-## Useful flags
+## All command-line flags
 
 ```
---out PATH       write JSON to one specific output path
---out-dir DIR    write all output JSON into this folder (created if missing)
---stdout         print JSON to stdout instead of writing a file
---upload         POST to WDGoWars after converting
---watch DIR      watch a folder, auto-convert + upload new files as they appear
---setup          run the interactive API-key wizard
---whoami         show which account your saved key belongs to
---dry-run        with --upload, build the request but don't send
---version        print Muninn's version
---update         pull the latest release (uses git pull if you cloned)
+--out PATH         write JSON to one specific output path
+--out-dir DIR      write all output JSON into this folder (created if missing)
+--stdout           print JSON to stdout instead of writing a file
+--upload           POST to WDGoWars after converting (HMAC-signed envelope)
+--watch DIR        watch a folder; auto-convert (and upload) new files
+--watch-interval N seconds between watch polls (default: 30)
+--watch-glob G     glob for the watch dir (default: *.txt; use * for all)
+--format FMT       force input format (auto|avr|sbs1|json|csv|mayhem)
+--csv-format COLS  column-order hint for generic CSV inputs
+--setup            interactive API-key wizard
+--save-key KEY     non-interactive: save a given API key
+--whoami           validate your stored API key and show account stats
+--no-save          with --upload, skip writing the local JSON file
+--dry-run          with --upload, build the request but don't send
+--key KEY          one-shot override of the stored API key
+--api-url URL      override the upload endpoint
+--batch-size N     aircraft per upload chunk (default: 1000)
+--version          print Muninn's version
+--update           pull the latest release (git pull if you cloned)
 ```
 
 ---
 
 ## Updating
 
-If you cloned the repo:
 ```bash
 python3 muninn.py --update
 ```
-That runs `git pull` in place. If you downloaded the ZIP instead, grab the
-newest one from the [Releases page](https://github.com/HiroAlleyCat/adsb-to-wdgwars/releases).
 
-Muninn also does a daily background check against the GitHub releases API
-and will print a one-liner if a newer version is out — no telemetry, just a
-single HEAD request, cached locally for 24h.
+That runs `git pull` in place if you cloned the repo. If you downloaded the ZIP instead, grab the newest one from the [Releases page](https://github.com/HiroAlleyCat/adsb-to-wdgwars/releases).
 
-See [CHANGELOG.md](CHANGELOG.md) for what's new in each release.
+Muninn also does a once-a-day background check against the GitHub releases API and prints a one-liner if a newer version is out. No telemetry — single HEAD request, cached locally for 24h. See [CHANGELOG.md](CHANGELOG.md) for per-release notes.
+
+---
+
+## Re-running first-time setup
+
+To change where the input/output folders live, or re-run the API-key prompt:
+
+```bash
+# folders
+del "%APPDATA%\muninn\folders.json"        (Windows)
+rm  ~/.config/muninn/folders.json          (Mac/Linux)
+
+# API key (just re-save it)
+python3 muninn.py --setup
+```
 
 ---
 
 ## Security
 
-- API key stored at `~/.config/muninn/api.key` (mode `0600` on Unix).
-- HMAC-SHA256-signed envelope, explicit TLS 1.2+ context.
-- Key is scrubbed from all error output.
+- API key stored at `%APPDATA%\muninn\api.key` (Windows) or `~/.config/muninn/api.key` (Unix, mode `0600`).
+- API key is **never** required for local conversion — only for `--upload`.
+- HMAC-SHA256-signed envelope, explicit TLS 1.2+ context, system trust store.
+- Key is scrubbed from all error output via `_scrub()`.
+- `--save-key` refuses to write through a symlink.
 - No telemetry. Nothing leaves your machine unless `--upload` is set.
 
-Full threat model: [SECURITY.md](SECURITY.md)
+Full threat model: [SECURITY.md](SECURITY.md). Found a vulnerability? Open a private security advisory via the repo's [Security tab](https://github.com/HiroAlleyCat/adsb-to-wdgwars/security/advisories).
 
 ---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

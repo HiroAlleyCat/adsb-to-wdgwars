@@ -2,14 +2,18 @@
 
 ## What this tool does
 
-- Reads a local ADS-B text file (or files in a watched directory).
+- Reads a local ADS-B text file (or every supported file in a chosen folder).
 - Decodes aircraft records.
-- Writes a JSON output file next to the input.
+- Writes a JSON output file next to the input, or in the configured output folder.
 - Optionally POSTs the records to `https://wdgwars.pl/api/upload/` (configurable).
+- Once per 24h, makes a single HEAD request to GitHub's releases API to check for a newer version. Cached locally in `~/.config/muninn/version-check.json`. Disable by deleting that file (it'll be re-checked but never sooner than daily).
+- On Windows, may create a desktop shortcut (`Muninn.lnk`) pointing at the local `muninn.py` script — only when the user explicitly says yes during first-run setup.
 
 ## What this tool **does not** do
 
-- ❌ **No telemetry, analytics, or "phone home" of any kind.** The tool only contacts `wdgwars.pl` (and only when `--upload` is set). The hostname is hardcoded; you can override it with `--api-url` if needed.
+- ❌ **No telemetry or analytics.** The only outbound traffic is:
+  - `https://wdgwars.pl/api/upload/` — only when `--upload` is set. Hostname hardcoded; override with `--api-url`.
+  - `https://api.github.com/repos/HiroAlleyCat/adsb-to-wdgwars/releases/latest` — single HEAD request, **at most once per 24h**, to compare your local version to the latest tag. No identifiers, no machine info, no usage data — just a public-API call to read a release tag. Result is cached in `~/.config/muninn/version-check.json`. Delete that file to reset; set `__version__` to `"99.0.0"` or stub out `_check_for_update()` if you want to disable it entirely.
 - ❌ **No `eval`, `exec`, `os.system`, or `shell=True` subprocess calls.** No command-injection paths.
 - ❌ **No remote code download/execution.** Pure stdlib + optional `pyModeS` (open-source, MIT, well-known in the ADS-B community).
 - ❌ **No data sent anywhere except WDGoWars when explicitly opted in via `--upload`.**
