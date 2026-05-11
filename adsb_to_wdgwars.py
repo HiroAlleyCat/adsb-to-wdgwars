@@ -77,6 +77,10 @@ def detect_format(path: Path) -> str:
                 return "sbs1"
             if s.startswith("{") or s.startswith("["):
                 return "json"
+            # PortaPack Mayhem ADSB.TXT format — raw hex prefix + labeled fields:
+            # "8DA4... ICAO:A41144 [Squawk:NNNN] [CALLSIGN] [Alt:N] [Lat:F Lon:F] ..."
+            if " ICAO:" in s and s[:14].replace(" ", "").isalnum():
+                return "mayhem"
             # Tab-separated AVR variants (some receivers prefix with timestamp)
             if "*" in s and s.endswith(";"):
                 return "avr-tagged"
@@ -306,6 +310,87 @@ def parse_json(path: Path) -> dict[str, dict]:
     return rows
 
 
+# ── PortaPack Mayhem ADSB.TXT ───────────────────────────────────────────────
+# Format: <raw_hex> ICAO:<hex6> [Squawk:NNNN] [<CALLSIGN>] [Alt:N] [Lat:F Lon:F]
+#         [Type:N Hdg:N (GS|TAS|IAS):N Vrate:N] [Sil:N]
+# Source: portapack-mayhem firmware/application/apps/ui_adsb_rx.cpp::ADSBLogger
+# Each line is one decoded frame; data accumulates per ICAO across lines.
+import re as _re
+
+_MAYHEM_ICAO   = _re.compile(r"\bICAO:([0-9A-Fa-f]{6})\b")
+_MAYHEM_ALT    = _re.compile(r"\bAlt:(-?\d+)\b")
+_MAYHEM_LAT    = _re.compile(r"\bLat:(-?\d+\.\d+)\b")
+_MAYHEM_LON    = _re.compile(r"\bLon:(-?\d+\.\d+)\b")
+_MAYHEM_HDG    = _re.compile(r"\bHdg:(\d+)\b")
+_MAYHEM_SPEED  = _re.compile(r"\b(?:GS|TAS|IAS):(\-?\d+)\b")
+_MAYHEM_SQUAWK = _re.compile(r"\bSquawk:(\d{4})\b")
+# Callsign is a bare token (no Key: prefix), 3-8 chars of letters/digits,
+# usually between Squawk/ICAO and Alt. We extract it positionally below.
+
+def parse_mayhem(path: Path) -> dict[str, dict]:
+    rows: dict[str, dict] = {}
+    with path.open("r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            s = line.strip()
+            if not s or s.startswith("#"):
+                continue
+            m = _MAYHEM_ICAO.search(s)
+            if not m:
+                continue
+            icao = m.group(1).upper()
+            entry = rows.setdefault(icao, {"icao": icao, "callsign": "",
+                                           "lat": None, "lon": None,
+                                           "alt_ft": 0, "speed_kt": 0,
+                                           "heading": 0,
+                                           "first_seen": _now_iso()})
+            lat_m = _MAYHEM_LAT.search(s)
+            lon_m = _MAYHEM_LON.search(s)
+            if lat_m and lon_m:
+                try:
+                    entry["lat"] = float(lat_m.group(1))
+                    entry["lon"] = float(lon_m.group(1))
+                except ValueError:
+                    pass
+            alt_m = _MAYHEM_ALT.search(s)
+            if alt_m:
+                try: entry["alt_ft"] = int(alt_m.group(1))
+                except ValueError: pass
+            spd_m = _MAYHEM_SPEED.search(s)
+            if spd_m:
+                try: entry["speed_kt"] = int(spd_m.group(1))
+                except ValueError: pass
+            hdg_m = _MAYHEM_HDG.search(s)
+            if hdg_m:
+                try: entry["heading"] = int(hdg_m.group(1))
+                except ValueError: pass
+            # Callsign: bare 3-8 char token of letters/digits between known
+            # labeled fields. Mayhem inserts it after Squawk (if present) or
+            # right after ICAO:HEX.
+            # Strategy: strip all "Key:Val" tokens + the leading raw hex,
+            # remaining tokens of length 3-8 alphanumeric is the callsign.
+            tokens = s.split()
+            for tok in tokens:
+                if ":" in tok:
+                    continue
+                if len(tok) > 28 and all(c in "0123456789abcdefABCDEF" for c in tok):
+                    continue  # raw hex prefix
+                tu = tok.upper().rstrip("_")
+                if 3 <= len(tu) <= 8 and tu.replace("-", "").isalnum() and not tu.isdigit():
+                    if not entry["callsign"]:
+                        entry["callsign"] = tu
+                    break
+
+    out: dict[str, dict] = {}
+    for icao, e in rows.items():
+        rec = _norm_record(icao=icao, callsign=e["callsign"],
+                          lat=e["lat"], lon=e["lon"],
+                          alt_ft=e["alt_ft"], speed_kt=e["speed_kt"],
+                          heading=e["heading"], first_seen=e["first_seen"])
+        if rec:
+            out[icao] = rec
+    return out
+
+
 # ── Generic CSV ─────────────────────────────────────────────────────────────
 def parse_csv(path: Path, fmt: str | None = None) -> dict[str, dict]:
     """Try heuristic column mapping; allow override via --csv-format header.
@@ -448,7 +533,7 @@ def main() -> int:
     )
     ap.add_argument("input", help="ADS-B capture file (.txt, .csv, .json)")
     ap.add_argument("--out", "-o", help="write JSON to this path (default: stdout if not uploading)")
-    ap.add_argument("--format", choices=["auto", "avr", "sbs1", "json", "csv"],
+    ap.add_argument("--format", choices=["auto", "avr", "sbs1", "json", "csv", "mayhem"],
                     default="auto", help="force input format (default: auto-detect)")
     ap.add_argument("--csv-format", help="comma-separated column names for "
                     "generic CSV: icao,callsign,lat,lon,alt_ft,...")
@@ -476,6 +561,8 @@ def main() -> int:
         rows = parse_sbs1(path)
     elif fmt == "json":
         rows = parse_json(path)
+    elif fmt == "mayhem":
+        rows = parse_mayhem(path)
     elif fmt == "csv":
         rows = parse_csv(path, fmt=args.csv_format)
     elif fmt == "empty":

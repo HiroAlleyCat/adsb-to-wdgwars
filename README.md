@@ -119,10 +119,11 @@ It **auto-detects** these (you don't have to tell it which):
 
 | Looks like | Format | Where you'd see it |
 |---|---|---|
-| `*8D4840D6202CC371C32CE0576098;` | AVR raw Mode-S | dump1090 `--raw` output, some H4M variants |
+| `8DA4... ICAO:A41144 DAL2594 Alt:34000 Lat:41.67 Lon:-81.47 ...` | **PortaPack Mayhem ADSB.TXT** | **HackRF + PortaPack H1/H2/H4/H4M** running Mayhem firmware |
+| `*8D4840D6202CC371C32CE0576098;` | AVR raw Mode-S | dump1090 `--raw` output, generic RTL-SDR |
 | `MSG,3,1,1,A12345,1,2026/05/10,...` | SBS-1 / BaseStation CSV | Most ADS-B receivers, dump1090 port 30003, readsb |
 | `{"aircraft":[{"hex":"a12345",...}]}` | dump1090 / readsb JSON | `aircraft.json` from `dump1090-fa`, FlightAware Pi |
-| `icao,lat,lon,alt,...` | Generic CSV | Some custom receivers — use `--csv-format` if it's not auto-detected |
+| `icao,lat,lon,alt,...` | Generic CSV | Custom receivers — use `--csv-format` if not auto-detected |
 
 If your file doesn't fit any of these, paste a 3-line sample in a GitHub issue and I'll add support.
 
