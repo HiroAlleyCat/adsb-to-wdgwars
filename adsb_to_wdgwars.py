@@ -522,6 +522,106 @@ def upload(records: list[dict], api_key: str, api_url: str = DEFAULT_API_URL,
     return 0
 
 
+# ── Watch mode ──────────────────────────────────────────────────────────────
+def _file_signature(p: Path) -> str:
+    """Cheap signature: size + mtime. Catches new files + edits without
+    needing a full hash."""
+    try:
+        st = p.stat()
+        return f"{st.st_size}:{int(st.st_mtime)}"
+    except OSError:
+        return ""
+
+
+def _convert_one(path: Path, fmt_override: str | None, csv_format: str | None) -> list[dict]:
+    fmt = fmt_override if fmt_override and fmt_override != "auto" else detect_format(path)
+    if fmt == "avr" or fmt == "avr-tagged":
+        rows = parse_avr(path)
+    elif fmt == "sbs1":
+        rows = parse_sbs1(path)
+    elif fmt == "json":
+        rows = parse_json(path)
+    elif fmt == "mayhem":
+        rows = parse_mayhem(path)
+    elif fmt == "csv":
+        rows = parse_csv(path, fmt=csv_format)
+    else:
+        return []
+    return list(rows.values())
+
+
+def watch_dir(watch_dir: Path, args) -> int:
+    """Poll the directory for new/changed files matching --watch-glob.
+    For each new file: convert → write JSON next to it → optionally upload.
+    State (signatures of processed files) is kept in .adsb-state.json in the
+    watched dir so restarts don't re-process everything."""
+    if not watch_dir.is_dir():
+        sys.exit(f"--watch requires a directory, got: {watch_dir}")
+    state_path = watch_dir / ".adsb-state.json"
+    seen: dict[str, str] = {}
+    try:
+        seen = json.loads(state_path.read_text())
+    except Exception:
+        seen = {}
+
+    api_key = None
+    if args.upload:
+        api_key = args.key or os.environ.get("WDGWARS_API_KEY", "").strip()
+        if not api_key:
+            sys.exit("no API key — pass --key or set WDGWARS_API_KEY")
+
+    print(f"[watch] watching {watch_dir.resolve()} every {args.watch_interval}s "
+          f"for {args.watch_glob!r} (Ctrl+C to stop)", file=sys.stderr)
+    print(f"[watch] {len(seen)} files already processed", file=sys.stderr)
+
+    try:
+        while True:
+            cycle_t0 = time.monotonic()
+            new_files = []
+            for f in sorted(watch_dir.glob(args.watch_glob)):
+                if f.name.startswith("."):
+                    continue
+                if f.name.endswith(".wdgwars.json"):
+                    continue  # don't re-process our own outputs
+                sig = _file_signature(f)
+                if not sig or seen.get(str(f.name)) == sig:
+                    continue
+                new_files.append((f, sig))
+
+            for f, sig in new_files:
+                try:
+                    print(f"\n[watch] processing {f.name}", file=sys.stderr)
+                    records = _convert_one(f, args.format if args.format != "auto" else None,
+                                          args.csv_format)
+                    print(f"[watch]   decoded {len(records)} aircraft", file=sys.stderr)
+                    out_path = f.parent / f"{f.stem}.wdgwars.json"
+                    out_path.write_text(json.dumps(records, indent=2))
+                    print(f"[watch]   wrote {out_path}", file=sys.stderr)
+                    if args.upload and records:
+                        rc = upload(records, api_key, args.api_url,
+                                   batch_size=args.batch_size,
+                                   dry_run=args.dry_run)
+                        if rc != 0:
+                            print(f"[watch]   upload failed — will retry next cycle",
+                                  file=sys.stderr)
+                            continue  # don't mark as seen if upload failed
+                    seen[str(f.name)] = sig
+                    # Persist after every successful file so we don't lose
+                    # progress on crash / Ctrl+C
+                    state_path.write_text(json.dumps(seen, indent=2))
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    print(f"[watch]   ERROR on {f.name}: {e}", file=sys.stderr)
+
+            elapsed = time.monotonic() - cycle_t0
+            sleep_for = max(1.0, args.watch_interval - elapsed)
+            time.sleep(sleep_for)
+    except KeyboardInterrupt:
+        print("\n[watch] stopped by user", file=sys.stderr)
+        return 0
+
+
 # ── CLI ─────────────────────────────────────────────────────────────────────
 def main() -> int:
     ap = argparse.ArgumentParser(
@@ -531,7 +631,17 @@ def main() -> int:
                "generic CSV). For generic CSV inputs, pass --csv-format to "
                "specify the column order.",
     )
-    ap.add_argument("input", help="ADS-B capture file (.txt, .csv, .json)")
+    ap.add_argument("input", help="ADS-B capture file (.txt, .csv, .json) "
+                    "OR a directory when used with --watch")
+    ap.add_argument("--watch", action="store_true",
+                    help="watch the input as a directory and process new "
+                         "files as they appear (loops until Ctrl+C)")
+    ap.add_argument("--watch-interval", type=int, default=30,
+                    help="seconds between directory polls when --watch is set "
+                         "(default: 30)")
+    ap.add_argument("--watch-glob", default="*.txt",
+                    help="glob pattern for files in the watched dir "
+                         "(default: *.txt). Use '*' for everything.")
     ap.add_argument("--out", "-o", help="write JSON to this exact path "
                     "(default: <input>.wdgwars.json next to the input file)")
     ap.add_argument("--stdout", action="store_true",
@@ -555,7 +665,11 @@ def main() -> int:
 
     path = Path(args.input)
     if not path.exists():
-        sys.exit(f"input file not found: {path}")
+        sys.exit(f"input not found: {path}")
+
+    # Watch mode — directory, loop forever
+    if args.watch:
+        return watch_dir(path, args)
 
     fmt = args.format if args.format != "auto" else detect_format(path)
     print(f"[adsb] detected format: {fmt}", file=sys.stderr)

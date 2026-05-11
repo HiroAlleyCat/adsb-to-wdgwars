@@ -122,6 +122,36 @@ Real aircraft sent: DAL1407, UAL1776, SKW499X, plus 4 NetJets corporate jets, al
 
 ---
 
+## Watch mode — drop files and forget
+
+If you regularly save H4M captures and want them auto-uploaded, point the tool at a folder and walk away:
+
+```bash
+WDGWARS_API_KEY="your-key" python3 adsb_to_wdgwars.py /path/to/captures --watch --upload
+```
+
+The tool will:
+- Poll the folder every 30 seconds (configurable with `--watch-interval N`)
+- Pick up any new `.txt` files (configurable with `--watch-glob '*.txt'`)
+- Convert each one, write the JSON next to it, push to WDGoWars
+- Skip files it's already processed (state kept in `.adsb-state.json` in the folder)
+- Survive Ctrl+C cleanly and resume exactly where it left off next time
+- Retry failed uploads on the next cycle automatically
+
+**Real example log:**
+```
+[watch] watching /home/babe/captures every 30s for '*.txt' (Ctrl+C to stop)
+[watch] 12 files already processed
+
+[watch] processing 2026-05-10-flight01.txt
+[watch]   decoded 47 aircraft
+[watch]   wrote /home/babe/captures/2026-05-10-flight01.wdgwars.json
+chunk 1/1: 47 aircraft, 8210 B
+  HTTP 200 in 11.1s imported=12 already_seen=35
+```
+
+Run it under `tmux`, `screen`, or as a `systemd` service to keep it going across reboots. Each H4M dump you save shows up on WDGoWars within 30 seconds with zero manual work.
+
 ## Frequently Asked Questions
 
 ### Is this a download/install thing or a terminal thing?
