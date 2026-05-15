@@ -19,10 +19,10 @@ const dryOutputEl = $("dry-output");
 // on *.github.io. Everywhere else (localhost, self-hosted, custom domain)
 // the upload path is available — the self-hosted serve.py proxies it via
 // same-origin so CORS doesn't apply.
-const IS_PUBLIC_DEPLOY = /\.github\.io$/i.test(location.hostname);
-if (IS_PUBLIC_DEPLOY) {
-  document.body.classList.add("public-deploy");
-}
+// The class is already on <html> from the inline head script (so first paint
+// doesn't flash the upload UI). Keep this in sync for any code path that
+// reads the flag later.
+const IS_PUBLIC_DEPLOY = document.documentElement.classList.contains("public-deploy");
 const apikeyEl = $("apikey");
 const apiurlEl = $("apiurl");
 const versionPill = $("version-pill");

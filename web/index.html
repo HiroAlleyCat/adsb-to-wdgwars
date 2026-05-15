@@ -7,6 +7,14 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+<script>
+  // Tag the document BEFORE CSS parses so the public-deploy hide rules apply
+  // on the very first paint — no flash of upload UI on github.io. Using
+  // documentElement here because <body> doesn't exist yet at <head> parse.
+  if (/\.github\.io$/i.test(location.hostname)) {
+    document.documentElement.classList.add("public-deploy");
+  }
+</script>
 <style>
   :root {
     --bg: #000;
@@ -389,16 +397,16 @@
      uploads. The site becomes pure parser/converter — drop, preview,
      download. Upload remains available for CLI users and self-hosters
      (where serve.py provides a same-origin proxy). */
-  body.public-deploy #upload,
-  body.public-deploy .dry-toggle,
-  body.public-deploy #upload-status,
-  body.public-deploy #dry-output,
-  body.public-deploy .settings-panel,
-  body.public-deploy .self-hosted-only { display: none !important; }
+  html.public-deploy #upload,
+  html.public-deploy .dry-toggle,
+  html.public-deploy #upload-status,
+  html.public-deploy #dry-output,
+  html.public-deploy .settings-panel,
+  html.public-deploy .self-hosted-only { display: none !important; }
   /* Inverse: the "for power users / CLI / self-hosted" hint only shows on the
      public site. Locally it's redundant — those users already have the
      upload UI right there. */
-  body:not(.public-deploy) .public-only { display: none !important; }
+  html:not(.public-deploy) .public-only { display: none !important; }
 
   /* Footer */
   footer {
