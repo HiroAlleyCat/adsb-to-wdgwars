@@ -110,6 +110,10 @@ Auto-detected from the first line of the file:
 --batch-size N     aircraft per upload chunk (default: 1000)
 --version          print Muninn's version
 --update           pull the latest release (git pull if you cloned)
+-q, --quiet        suppress informational output (banners, format/decoded
+                   notices, range + dump1090 warnings). Errors still print.
+--no-version-check skip the daily GitHub release check entirely (use for
+                   offline / privacy-conscious setups).
 ```
 
 ---

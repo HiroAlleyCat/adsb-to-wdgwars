@@ -45,8 +45,12 @@ License: MIT
 """
 from __future__ import annotations
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 GITHUB_REPO = "HiroAlleyCat/adsb-to-wdgwars"
+
+# Set by main() when --quiet is passed. Module-level so helpers can read it
+# without plumbing the flag through every call site.
+_QUIET = False
 
 import argparse
 import base64
@@ -520,7 +524,7 @@ def _warn_range(records: list[dict]) -> None:
     remote feeder like piaware or FlightAware is also active on the same
     machine, silently mixing distant aircraft into the local session.
     """
-    if len(records) < 2:
+    if _QUIET or len(records) < 2:
         return
     lats = [r["lat"] for r in records]
     lons = [r["lon"] for r in records]
@@ -1075,7 +1079,8 @@ def _process_one_file(path: Path, args) -> tuple[int, list[dict]]:
     """Decode a single capture file and write its JSON output.
     Returns (exit_code, records). Does NOT upload — caller decides."""
     fmt = args.format if args.format != "auto" else detect_format(path)
-    print(f"[muninn] detected format: {fmt}", file=sys.stderr)
+    if not _QUIET:
+        print(f"[muninn] detected format: {fmt}", file=sys.stderr)
 
     if fmt == "avr" or fmt == "avr-tagged":
         rows = parse_avr(path)
@@ -1097,8 +1102,9 @@ def _process_one_file(path: Path, args) -> tuple[int, list[dict]]:
 
     records = list(rows.values())
     _warn_range(records)
-    print(f"[muninn] decoded {len(records)} unique aircraft with positions",
-          file=sys.stderr)
+    if not _QUIET:
+        print(f"[muninn] decoded {len(records)} unique aircraft with positions",
+              file=sys.stderr)
 
     web_payload = _to_dump1090_fa(records)
     out_path: Path | None = None
@@ -1118,8 +1124,9 @@ def _process_one_file(path: Path, args) -> tuple[int, list[dict]]:
     if out_path is not None:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(web_payload, indent=2))
-        print(f"[muninn] OK -- wrote {len(records)} aircraft to:\n"
-              f"       {out_path}", file=sys.stderr)
+        if not _QUIET:
+            print(f"[muninn] OK -- wrote {len(records)} aircraft to:\n"
+                  f"       {out_path}", file=sys.stderr)
 
     return 0, records
 
@@ -1144,6 +1151,8 @@ def _do_upload(records: list[dict], args) -> int:
 
 
 def _check_dump1090_net() -> None:
+    if _QUIET:
+        return
     import socket
     PORTS = {
         30104: 'Beast input (--net-bi-port) -- accepts remote aircraft feeds',
@@ -1286,18 +1295,29 @@ def main() -> int:
                     help=f"override upload endpoint (default: {DEFAULT_API_URL})")
     ap.add_argument("--batch-size", type=int, default=1000,
                     help="aircraft per upload chunk (default: 1000)")
+    ap.add_argument("-q", "--quiet", action="store_true",
+                    help="suppress informational output (banners, format/decoded "
+                         "notices, dump1090 + range warnings). Errors still print.")
+    ap.add_argument("--no-version-check", action="store_true",
+                    help="skip the daily GitHub release check entirely "
+                         "(use for offline / privacy-conscious setups).")
     args = ap.parse_args()
+
+    global _QUIET
+    _QUIET = args.quiet
 
     # Self-update mode — handle first, doesn't need an input
     if args.update:
         return _run_update()
 
-    # Soft nudge: if a newer release is out, mention it (non-blocking, daily-cached)
-    newer = _check_for_update()
-    if newer:
-        print(f"[muninn] note: v{newer} is available "
-              f"(you're on v{__version__}). Run `--update` to upgrade.",
-              file=sys.stderr)
+    # Soft nudge: if a newer release is out, mention it (non-blocking, daily-cached).
+    # Skipped under --quiet and --no-version-check.
+    if not args.quiet and not args.no_version_check:
+        newer = _check_for_update()
+        if newer:
+            print(f"[muninn] note: v{newer} is available "
+                  f"(you're on v{__version__}). Run `--update` to upgrade.",
+                  file=sys.stderr)
 
     _check_dump1090_net()
 

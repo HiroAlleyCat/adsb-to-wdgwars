@@ -4,6 +4,17 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.5.1] — 2026-05-15
+
+### Added
+- **`-q` / `--quiet`** suppresses informational output — the format-detection
+  notice, decoded-count line, OK/wrote summary, dump1090 network warning, and
+  range-sanity warning. Errors and key-rejection messages still print. Useful
+  for cron jobs and scripted pipelines that just want the JSON file.
+- **`--no-version-check`** skips the daily HEAD request to GitHub's releases
+  API entirely. For offline boxes and anyone who'd rather not phone home at
+  all. (The check is already cached for 24 h, but this lets you opt out.)
+
 ## [1.5.0] — 2026-05-15
 
 ### Added
