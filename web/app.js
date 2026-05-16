@@ -152,7 +152,24 @@ if len(records) >= 2:
 json.dumps({"format": fmt, "records": records, "warning": warning})
 `);
   } catch (e) {
-    setStatus("Parse failed: " + (e.message || e), "err");
+    // Pyodide stringifies exceptions into a multi-line Python traceback. For
+    // the user, surface the most relevant line (final exception type+msg)
+    // and a friendly hint. Frame the rest in DevTools for anyone debugging.
+    const raw = String(e.message || e);
+    console.error("[muninn] parse error:", raw);
+    const lines = raw.trim().split("\n").map(l => l.trim()).filter(Boolean);
+    const last = lines[lines.length - 1] || raw;
+    let friendly = `Couldn't parse ${file.name}. `;
+    if (/UnicodeDecodeError|codec can't decode|invalid start byte/i.test(raw)) {
+      friendly += "Looks like a binary file — Muninn needs a text capture (.txt / .csv / .json / .log) or a .gz of one.";
+    } else if (/JSONDecodeError|Expecting value/i.test(raw)) {
+      friendly += "The file looks like JSON but doesn't parse. Check that it's a valid dump1090 / readsb aircraft.json or NDJSON.";
+    } else if (/ValueError/i.test(raw) && /unsupported/i.test(raw)) {
+      friendly += "Format not recognised. Supported: AVR (.txt), SBS-1 / BaseStation (.txt), dump1090 / readsb / VRS JSON, NDJSON, gzipped JSON, PortaPack Mayhem.";
+    } else {
+      friendly += `(${last})`;
+    }
+    setStatus(friendly, "err");
     return;
   }
 
