@@ -45,7 +45,7 @@ License: MIT
 """
 from __future__ import annotations
 
-__version__ = "1.7.0"
+__version__ = "1.8.0"
 GITHUB_REPO = "HiroAlleyCat/adsb-to-wdgwars"
 
 # Set by main() when --quiet is passed. Module-level so helpers can read it
@@ -455,6 +455,11 @@ def detect_format(path: Path) -> str:
             0x00, 0x07, 0x0A, 0x0B, 0x14, 0x4D, 0x65,
         ):
             return "gdl90"
+        # Mode-S Beast binary: 0x1A start, then type byte 0x31/0x32/0x33.
+        # Like GDL-90 sniff, the message-type whitelist avoids matching a
+        # text file that happens to start with the Ctrl+Z character.
+        if len(head4) >= 2 and head4[0] == 0x1A and head4[1] in (0x31, 0x32, 0x33):
+            return "beast"
     except OSError:
         pass
 
@@ -787,16 +792,26 @@ def parse_json(path: Path) -> dict[str, dict]:
             text = path.read_text(encoding="utf-8", errors="replace")
 
     def _ingest(ac: dict, now_ts: float | None = None):
-        # Field aliases cover dump1090-fa / readsb / VRS / OpenSky / generic.
-        # The case-mixed VRS keys (Icao, Lat, Long, Alt, Call, Spd, Trak) sit
-        # alongside the lower-case dump1090 keys so a single _ingest handles
-        # both dialects in NDJSON files that mix sources.
+        # Field aliases span dump1090-fa / readsb / VRS / Stratux / generic.
+        # Stratux fields are CapitalCase with underscores: Icao_addr, Tail,
+        # Lat, Lng, Alt, Speed, Track, Position_valid. Bring them under the
+        # same _ingest so NDJSON files mixing sources work transparently.
         icao = (ac.get("hex") or ac.get("icao") or ac.get("Icao")
                 or ac.get("ICAO") or "").upper()
+        if not icao and ac.get("Icao_addr") is not None:
+            # Stratux ships the ICAO as an int. Convert to 6-hex.
+            try:
+                icao = f"{int(ac['Icao_addr']):06X}"
+            except (TypeError, ValueError):
+                pass
         if not icao:
             return
+        # Stratux signals position-validity explicitly — skip aircraft with
+        # known-invalid positions even if Lat/Lng happen to be present.
+        if ac.get("Position_valid") is False:
+            return
         lat = ac.get("lat") if ac.get("lat") is not None else ac.get("Lat")
-        # VRS uses "Long" (with the g) for longitude — easy to miss.
+        # VRS uses "Long" (with the g) for longitude; Stratux uses "Lng".
         lon = ac.get("lon") if ac.get("lon") is not None else (
             ac.get("Long") if ac.get("Long") is not None else ac.get("Lng"))
         if lat is None or lon is None:
@@ -807,14 +822,15 @@ def parse_json(path: Path) -> dict[str, dict]:
         rec = _norm_record(
             icao=icao,
             callsign=(ac.get("flight") or ac.get("callsign")
-                      or ac.get("Call") or "").strip(),
+                      or ac.get("Call") or ac.get("Tail")
+                      or ac.get("Reg") or "").strip(),
             lat=lat, lon=lon,
             alt_ft=int(ac.get("alt_baro") or ac.get("altitude")
                        or ac.get("alt") or ac.get("Alt") or 0),
             speed_kt=int(float(ac.get("gs") or ac.get("speed")
-                               or ac.get("Spd") or 0)),
+                               or ac.get("Spd") or ac.get("Speed") or 0)),
             heading=int(float(ac.get("track") or ac.get("heading")
-                              or ac.get("Trak") or 0)),
+                              or ac.get("Trak") or ac.get("Track") or 0)),
             first_seen=ts_str,
         )
         if rec:
@@ -834,6 +850,18 @@ def parse_json(path: Path) -> dict[str, dict]:
             if "acList" in obj:
                 for ac in obj["acList"]:
                     _ingest(ac)
+                return rows
+            # Stratux `/traffic` shape — top-level dict whose values are the
+            # aircraft entries (keyed by ICAO hex string). Tell apart from
+            # other dict shapes by sniffing the first value for the Stratux
+            # signature fields.
+            first_val = next(iter(obj.values()), None) if obj else None
+            if isinstance(first_val, dict) and (
+                "Icao_addr" in first_val or "Position_valid" in first_val
+            ):
+                for ac in obj.values():
+                    if isinstance(ac, dict):
+                        _ingest(ac)
                 return rows
         if isinstance(obj, list):
             for ac in obj:
@@ -1026,6 +1054,115 @@ def parse_gdl90(path: Path) -> dict[str, dict]:
             if rec:
                 rows[rec["icao"]] = rec
     return rows
+
+
+# ── Mode-S Beast binary ─────────────────────────────────────────────────────
+# dump1090's native wire protocol on TCP port 30005. Each message:
+#     0x1A <type> <6B timestamp> <1B signal> <data>
+# where type is:
+#     0x31 -> Mode AC, data = 2 bytes
+#     0x32 -> Mode S short, data = 7 bytes
+#     0x33 -> Mode S long, data = 14 bytes
+# Any literal 0x1A inside the message is escaped as 0x1A 0x1A.
+#
+# Decoding strategy: re-emit each Mode-S short/long message as a hex string
+# and feed it into pyModeS via the same PipeDecoder path parse_avr already
+# uses. That gives us position decoding for free — Beast is just a binary
+# container around the same DF17 frames.
+def parse_beast(path: Path) -> dict[str, dict]:
+    try:
+        import pyModeS as pms
+    except ImportError:
+        sys.exit("Beast binary input requires pyModeS — install with: pip install pyModeS")
+
+    raw = path.read_bytes()
+    if not raw:
+        return {}
+    # Unescape: every 0x1A 0x1A is a single literal 0x1A.
+    buf = bytearray()
+    i = 0
+    while i < len(raw):
+        if raw[i] == 0x1A and i + 1 < len(raw) and raw[i + 1] == 0x1A:
+            buf.append(0x1A)
+            i += 2
+        else:
+            buf.append(raw[i])
+            i += 1
+
+    # Walk and pull out each message. After unescape, ESC (0x1A) only appears
+    # as a frame start byte; safe to split.
+    hex_msgs: list[str] = []
+    i = 0
+    while i < len(buf):
+        if buf[i] != 0x1A:
+            i += 1
+            continue
+        if i + 8 >= len(buf):
+            break
+        typ = buf[i + 1]
+        if typ == 0x32:
+            data_len = 7
+        elif typ == 0x33:
+            data_len = 14
+        else:
+            # Mode-AC (0x31) and unknown types — skip, ADS-B position
+            # decoding only fires on Mode-S short/long.
+            i += 1
+            continue
+        end = i + 2 + 6 + 1 + data_len  # ESC + type + ts + sig + data
+        if end > len(buf):
+            break
+        data = buf[i + 2 + 6 + 1 : end]
+        hex_msgs.append(data.hex())
+        i = end
+
+    if not hex_msgs:
+        return {}
+
+    # Feed into pyModeS PipeDecoder — same path parse_avr uses, which
+    # already handles paired CPR position decoding + callsign / altitude /
+    # velocity merging per ICAO. Beast is just AVR in a binary container.
+    # NOTE: pyModeS PipeDecoder emits "latitude"/"longitude"/"track" — NOT
+    # "lat"/"lon"/"heading". Using the wrong keys silently drops every
+    # position record.
+    pd = pms.PipeDecoder()
+    rows: dict[str, dict] = {}
+    now = time.time()
+    for idx, hexmsg in enumerate(hex_msgs):
+        try:
+            d = pd.decode(hexmsg, timestamp=now + idx * 0.01)
+        except Exception:
+            continue
+        if not d:
+            continue
+        icao = (d.get("icao") or "").upper()
+        if not icao:
+            continue
+        entry = rows.setdefault(icao, {"icao": icao, "callsign": "",
+                                       "lat": None, "lon": None,
+                                       "alt_ft": 0, "speed_kt": 0,
+                                       "heading": 0, "first_seen": _now_iso()})
+        if d.get("callsign"):
+            entry["callsign"] = d["callsign"].strip().rstrip("_")
+        if d.get("latitude") is not None and d.get("longitude") is not None:
+            entry["lat"] = d["latitude"]
+            entry["lon"] = d["longitude"]
+        if d.get("altitude"):
+            entry["alt_ft"] = int(d["altitude"])
+        if d.get("groundspeed"):
+            entry["speed_kt"] = int(d["groundspeed"])
+        if d.get("track") is not None:
+            entry["heading"] = int(float(d["track"]))
+
+    out: dict[str, dict] = {}
+    for icao, e in rows.items():
+        rec = _norm_record(icao=icao, callsign=e["callsign"],
+                           lat=e["lat"], lon=e["lon"], alt_ft=e["alt_ft"],
+                           speed_kt=e["speed_kt"], heading=e["heading"],
+                           first_seen=e["first_seen"])
+        if rec:
+            out[icao] = rec
+    return out
 
 
 # ── Generic CSV ─────────────────────────────────────────────────────────────
@@ -1285,6 +1422,8 @@ def _process_one_file(path: Path, args) -> tuple[int, list[dict]]:
         rows = parse_mayhem(path)
     elif fmt == "gdl90":
         rows = parse_gdl90(path)
+    elif fmt == "beast":
+        rows = parse_beast(path)
     elif fmt == "csv":
         rows = parse_csv(path, fmt=args.csv_format)
     elif fmt == "empty":

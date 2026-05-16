@@ -126,6 +126,8 @@ elif fmt == "mayhem":
     rows = muninn.parse_mayhem(p)
 elif fmt == "gdl90":
     rows = muninn.parse_gdl90(p)
+elif fmt == "beast":
+    rows = muninn.parse_beast(p)
 elif fmt == "csv":
     rows = muninn.parse_csv(p, fmt=None)
 elif fmt == "empty":

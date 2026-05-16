@@ -4,6 +4,31 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.8.0] — 2026-05-15
+
+### Added
+- **Stratux JSON** — the `/traffic` endpoint output from Stratux DIY
+  cockpit receivers. Top-level dict keyed by ICAO hex, values are
+  aircraft dicts using `Icao_addr`/`Tail`/`Reg`/`Lat`/`Lng`/`Alt`/
+  `Speed`/`Track`/`Position_valid` field names. Detected by the
+  Stratux-specific `Icao_addr` / `Position_valid` signature on the
+  first dict value. Records with `Position_valid: false` are skipped.
+- **Mode-S Beast binary** (dump1090's native wire protocol on TCP
+  30005). Each message is `0x1A <type> <6B ts> <1B sig> <data>` with
+  `0x1A 0x1A` byte-stuffing. Detection: 0x1A start + type byte 0x31 /
+  0x32 / 0x33. Mode-S short and long messages are extracted as hex
+  and fed into pyModeS PipeDecoder (same path as parse_avr), so all
+  the CPR-pairing / callsign-merging / altitude-tracking logic is
+  shared. CRC validation is currently skipped — accept anything that
+  decodes cleanly.
+
+### Fixed
+- The new Beast parser revealed a class of latent bug: pyModeS
+  PipeDecoder emits position records under `latitude`/`longitude`/
+  `track` keys, not `lat`/`lon`/`heading`. parse_avr was already
+  using the correct keys; the first draft of parse_beast wasn't.
+  Now both go through the same key set.
+
 ## [1.7.0] — 2026-05-15
 
 ### Added (experimental)
