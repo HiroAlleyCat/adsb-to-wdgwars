@@ -4,6 +4,18 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.6.1] — 2026-05-15
+
+### Fixed
+- `detect_format` now skips `;`-prefixed comment lines in addition to
+  `#`-prefixed ones. AVR captures from pyModeS-style tooling traditionally
+  use `;` for block comments at the top of the file (the frame terminator
+  is also `;` but always preceded by `*<hex>`, so a line that *starts*
+  with `;` is unambiguously a comment). Previously, `examples/avr_sample.txt`
+  was being misdetected as CSV because its first non-empty line was
+  `; Sample AVR raw Mode-S ...`. End-to-end regression sweep added in
+  `examples/README.md` catches this class of bug.
+
 ## [1.6.0] — 2026-05-15
 
 ### Added

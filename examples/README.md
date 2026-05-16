@@ -8,11 +8,11 @@ aircraft count so you can verify a parser change end-to-end.
 
 | File | Format | Aircraft (positions) | Notes |
 |---|---|---:|---|
-| `avr_sample.txt`        | AVR raw           |   1 | From `pyModeS` docs; tiny smoke test |
+| `avr_sample.txt`        | AVR raw           |   0 | Smoke test — 2 frames, no valid CPR pair, parser-doesn't-crash check |
 | `avr_real.txt`          | AVR raw           |   8 | Real HackRF capture, Cleveland area |
-| `sbs1_sample.txt`       | SBS-1 (BaseStation) |  1 | Hand-crafted |
+| `sbs1_sample.txt`       | SBS-1 (BaseStation) |  3 | Hand-crafted across 3 ICAOs |
 | `sbs1_real.txt`         | SBS-1             |  10 | Real port-30003 capture |
-| `dump1090_sample.json`  | dump1090 / readsb |   1 | aircraft.json shape |
+| `dump1090_sample.json`  | dump1090 / readsb |   2 | aircraft.json shape |
 | `dump1090_real.json`    | dump1090 / readsb |  12 | Real readsb snapshot |
 | `mayhem_sample.txt`     | PortaPack Mayhem  |   6 | HackRF Mayhem firmware output |
 | `vrs_sample.json`       | VRS (acList)      |  12 | Derived from `dump1090_real.json` |

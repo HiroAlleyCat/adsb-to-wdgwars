@@ -45,7 +45,7 @@ License: MIT
 """
 from __future__ import annotations
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 GITHUB_REPO = "HiroAlleyCat/adsb-to-wdgwars"
 
 # Set by main() when --quiet is passed. Module-level so helpers can read it
@@ -465,7 +465,11 @@ def detect_format(path: Path) -> str:
     with opener() as f:
         for raw in f:
             s = raw.strip()
-            if not s or s.startswith("#"):
+            # Skip blanks and comment lines. AVR captures from pyModeS-style
+            # tooling traditionally use `;` for block comments; the frame
+            # terminator is also `;` but always preceded by `*<hex>`, so a
+            # line that STARTS with `;` is unambiguously a comment.
+            if not s or s.startswith("#") or s.startswith(";"):
                 continue
             if s.startswith("*") and s.endswith(";"):
                 return "avr"
