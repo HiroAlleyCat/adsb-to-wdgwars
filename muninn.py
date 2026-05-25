@@ -1238,6 +1238,17 @@ def _ingest_csv_row(r: list[str], fields: list[str], rows: dict[str, dict]):
 
 
 # ── WDGoWars uploader ───────────────────────────────────────────────────────
+_USE_COLOR = sys.stderr.isatty() and os.environ.get("NO_COLOR") is None
+
+def _tag(label: str, code: str) -> str:
+    if _USE_COLOR:
+        return f"[{code}m{label}[0m"
+    return label
+
+def _OK() -> str:    return _tag("[OK]", "1;32")     # bold green
+def _FAIL() -> str:  return _tag("[FAIL]", "1;31")   # bold red
+def _INFO() -> str:  return _tag("[..]", "1;36")     # bold cyan
+
 def upload(records: list[dict], api_key: str, api_url: str = DEFAULT_API_URL,
            batch_size: int = 1000, dry_run: bool = False) -> int:
     if not records:
@@ -1280,20 +1291,23 @@ def upload(records: list[dict], api_key: str, api_url: str = DEFAULT_API_URL,
                 total_imported += imp
                 total_seen += seen
                 total_sent += len(chunk)
-                print(f"  HTTP {resp.status} in {time.monotonic() - t0:.1f}s "
-                      f"imported={imp} already_seen={seen}", file=sys.stderr)
+                print(f"  {_OK()} accepted in {time.monotonic() - t0:.1f}s. "
+                      f"{imp} new aircraft, {seen} already on your account.",
+                      file=sys.stderr)
                 badges = data.get("new_badges") or []
                 if badges:
                     print(f"  new badges: {badges}", file=sys.stderr)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")[:200]
-            print(f"  HTTP {e.code}: {_scrub(body, api_key)}", file=sys.stderr)
+            print(f"  {_FAIL()} rejected by wdgwars.pl (HTTP {e.code}): {_scrub(body, api_key)}",
+                  file=sys.stderr)
             return 1
         except Exception as e:
             print(f"  upload error: {_scrub(str(e), api_key)}", file=sys.stderr)
             return 1
-    print(f"DONE — aircraft_sent={total_sent} imported={total_imported} "
-          f"already_seen={total_seen}", file=sys.stderr)
+    print(f"{_OK()} Upload accepted by wdgwars.pl. Sent {total_sent} aircraft. "
+          f"{total_imported} added to your score, {total_seen} already on file.",
+          file=sys.stderr)
     return 0
 
 
