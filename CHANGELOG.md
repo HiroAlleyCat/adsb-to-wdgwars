@@ -4,6 +4,23 @@ All notable changes to Muninn are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [2.0.1] - 2026-05-29 - Fix update-checker false positive
+
+### Fixed
+
+- `_check_for_update` was comparing the GitHub-releases tag against
+  `__version__` with `!=` instead of `>`. On a development build whose
+  version is ahead of the published release (e.g. 2.0.0 local vs
+  v1.11.1 on GitHub), it falsely reported "v1.11.1 is available" and
+  suggested downgrading. Now uses a small inline semver parser and
+  reports only when the latest tag is strictly greater.
+
+### Added
+
+- `_version_tuple(s)` helper — parses dotted versions with tolerance
+  for the leading `v` and pre-release/build suffixes. Unparseable
+  versions return an empty tuple so the check skips gracefully.
+
 ## [2.0.0] - 2026-05-28 - Extract transport to gungnir
 
 Structural refactor. **No wire-protocol change** — the HMAC envelope
