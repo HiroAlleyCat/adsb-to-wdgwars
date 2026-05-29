@@ -45,7 +45,7 @@ License: MIT
 """
 from __future__ import annotations
 
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 GITHUB_REPO = "HiroAlleyCat/adsb-to-wdgwars"
 GITHUB_URL = f"https://github.com/{GITHUB_REPO}"
 
@@ -1472,17 +1472,48 @@ def _check_dump1090_net() -> None:
     print('[muninn]   Fix: restart dump1090 with --net-bi-port 0 --net-ri-port 0 to block input while keeping output.', file=sys.stderr)
 
 
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """Parse a dotted semver-ish string into a tuple of ints.
+
+    Tolerates leading "v", trailing pre-release / build metadata
+    ("2.0.0-rc1" → (2, 0, 0)), and missing trailing components
+    ("2" → (2,)). Anything unparseable returns an empty tuple so the
+    caller can decide what to do (we treat that as "skip the check").
+    """
+    s = (v or "").lstrip("v").strip()
+    # Strip pre-release / build suffix before parsing
+    for sep in ("-", "+", " "):
+        if sep in s:
+            s = s.split(sep, 1)[0]
+    parts: list[int] = []
+    for chunk in s.split("."):
+        if not chunk.isdigit():
+            return ()
+        parts.append(int(chunk))
+    return tuple(parts)
+
+
 def _check_for_update() -> str | None:
     """Quick non-blocking version check against the GitHub releases API.
     Cached for 24h in the user's config dir so we don't hammer the API.
-    Returns the latest tag if newer than __version__, else None."""
+    Returns the latest tag string IF it parses as strictly newer than
+    __version__, else None.
+
+    Comparing strictly newer (rather than not-equal) avoids the false
+    positive where a user on a development version (e.g. 2.0.0) sees
+    "v1.11.1 is available" because the GitHub release tag still lags
+    the local version.
+    """
     cache = _key_path().parent / "version-check.json"
+    cur_v = _version_tuple(__version__)
     try:
         if cache.exists():
             blob = json.loads(cache.read_text())
             if time.time() - blob.get("checked_at", 0) < 86400:
                 latest = blob.get("latest")
-                return latest if latest and latest != __version__ else None
+                if latest and _version_tuple(latest) > cur_v:
+                    return latest
+                return None
     except Exception:
         pass
     try:
@@ -1499,7 +1530,9 @@ def _check_for_update() -> str | None:
         cache.write_text(json.dumps({"checked_at": time.time(), "latest": latest}))
     except Exception:
         pass
-    return latest if latest and latest != __version__ else None
+    if latest and _version_tuple(latest) > cur_v:
+        return latest
+    return None
 
 
 def _run_update() -> int:
