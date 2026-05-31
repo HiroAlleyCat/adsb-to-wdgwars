@@ -39,6 +39,30 @@ done
 A failure on *any* line means a parser regression — flag before
 shipping.
 
+## Cached output envelopes (`*.wdgwars.json`)
+
+Each input fixture below has a sibling `<stem>.wdgwars.json` checked into
+the repo: the exact dump1090-fa-shaped JSON envelope Muninn emits for that
+input. They exist for cross-implementation parity testing — if another
+project re-implements one of these parsers in a different language, diff
+its output against the cached envelope to confirm byte-equivalent shape.
+
+| Cached envelope | Source fixture |
+|---|---|
+| `dump1090_real.wdgwars.json`    | `dump1090_real.json` |
+| `sbs1_real.wdgwars.json`        | `sbs1_real.txt` |
+| `sbs1_sample.wdgwars.json`      | `sbs1_sample.txt` |
+| `mayhem_sample.wdgwars.json`    | `mayhem_sample.txt` |
+| `stratux_sample.wdgwars.json`   | `stratux_sample.json` |
+| `vrs_sample.wdgwars.json`       | `vrs_sample.json` |
+| `ndjson_sample.wdgwars.json`    | `ndjson_sample.json` |
+| `tar1090_chunk_sample.wdgwars.json` | `tar1090_chunk_sample.json.gz` |
+
+To regenerate one, run `python3 muninn.py <input>` — the default output
+path is `<stem>.wdgwars.json` next to the input. Note that the `now`
+field is the wall-clock time of the run, so regenerating produces a
+different `now` value; the aircraft list shape and counts are stable.
+
 ## Where the real captures came from
 
 - `avr_real.txt`, `sbs1_real.txt`, `dump1090_real.json` — captured on
